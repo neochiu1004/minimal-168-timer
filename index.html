@@ -71,6 +71,7 @@
     <h3 style="margin-top:0; font-size: 1.1rem;">📝 手動補錄</h3>
     <input type="date" id="manual-date">
     <button id="btn-manual" style="background: var(--info); font-size: 1rem; padding: 10px;">補錄當天達成</button>
+    <button id="btn-delete" style="background: var(--danger); font-size: 1rem; padding: 10px; margin-top: 10px;">刪除此日紀錄</button>
   </div>
 
 <script>
@@ -100,6 +101,7 @@
   const elAchievements = document.getElementById('achievements');
   const elManualDate = document.getElementById('manual-date');
   const elBtnManual = document.getElementById('btn-manual');
+  const elBtnDelete = document.getElementById('btn-delete');
 
   // 初始化設定 DatePicker 最大值為今天
   elManualDate.max = getLocalDateStr();
@@ -284,6 +286,43 @@
       return;
     }
     recordSuccess(d);
+  });
+
+  // 刪除紀錄 (雙重點擊防呆機制)
+  let deleteConfirmTimeout = null;
+  elBtnDelete.addEventListener('click', () => {
+    const d = elManualDate.value;
+    if (!d) {
+      elMessage.textContent = "請先選擇要刪除的日期！";
+      return;
+    }
+    if (!historyLogs.includes(d)) {
+      elMessage.textContent = `⚠️ ${d} 目前沒有達成紀錄。`;
+      return;
+    }
+
+    if (deleteConfirmTimeout) {
+      // 第二次點擊：確認刪除
+      clearTimeout(deleteConfirmTimeout);
+      deleteConfirmTimeout = null;
+      
+      historyLogs = historyLogs.filter(log => log !== d);
+      localStorage.setItem('history_logs', JSON.stringify(historyLogs));
+      renderStats();
+      
+      elMessage.textContent = `🗑️ 已刪除 ${d} 的紀錄。`;
+      elBtnDelete.textContent = '刪除此日紀錄';
+      elBtnDelete.style.opacity = '1';
+    } else {
+      // 第一次點擊：進入確認狀態
+      elBtnDelete.textContent = '⚠️ 再次點擊以確認刪除';
+      elBtnDelete.style.opacity = '0.8';
+      deleteConfirmTimeout = setTimeout(() => {
+        deleteConfirmTimeout = null;
+        elBtnDelete.textContent = '刪除此日紀錄';
+        elBtnDelete.style.opacity = '1';
+      }, 3000);
+    }
   });
 
   // ================= 初始啟動 =================
