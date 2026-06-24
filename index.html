@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>極簡 168 計時器</title>
 <style>
+  /* ================= SECTION 1: 極簡樣式與 UI 結構 ================= */
   :root {
     --bg: #121212; --text: #ffffff; 
     --primary: #4caf50; --danger: #f44336; --info: #2196f3; --border: #333;
@@ -30,7 +31,6 @@
     transition: opacity 0.2s;
   }
   button:active { opacity: 0.8; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
   #btn-stop { background: var(--danger); display: none; }
   .section { 
     margin-top: 30px; padding: 15px; border: 1px solid var(--border); 
@@ -38,15 +38,35 @@
     background: #1e1e1e;
   }
   #message { color: #aaa; min-height: 24px; margin-top: 5px; font-size: 0.9rem;}
-  input[type="date"], select { 
-    padding: 10px; font-size: 1rem; border-radius: 5px; 
-    border: none; margin-bottom: 10px; width: calc(100% - 20px);
-    background: #333; color: white; color-scheme: dark;
+  
+  /* 雙選單輸入框排版 */
+  .input-group {
+    display: flex; gap: 10px; max-width: 320px; margin: 0 auto 10px auto;
   }
+  input[type="date"], select { 
+    padding: 10px; font-size: 1rem; border-radius: 5px; width: 100%;
+    border: none; background: #333; color: white; color-scheme: dark; box-sizing: border-box;
+  }
+  
   ul { text-align: left; padding-left: 20px; margin: 10px 0 0 0; }
   li { margin-bottom: 5px; font-size: 0.95rem; }
   .achieved { color: #4caf50; }
   .locked { color: #888; text-decoration: line-through; }
+  
+  /* 歷史紀錄清單與刪除按鈕 */
+  #history-container { 
+    max-height: 150px; overflow-y: auto; margin-top: 15px; 
+    border-top: 1px dashed var(--border); padding-top: 10px; 
+  }
+  .history-item { 
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 10px; border-bottom: 1px solid #2a2a2a; font-size: 0.95rem;
+  }
+  .delete-btn { 
+    cursor: pointer; color: #aaa; font-weight: bold; padding: 5px 10px; 
+    background: #333; border-radius: 4px; font-size: 0.8rem;
+  }
+  .delete-btn.confirming { color: var(--bg); background: #ffeb3b; }
 </style>
 </head>
 <body>
@@ -56,9 +76,12 @@
   <div id="timer">16:00:00</div>
   <div id="target-time"></div>
   
-  <select id="custom-start-time" style="max-width: 320px; box-sizing: border-box;">
-    <option value="">預設 (現在開始)</option>
-  </select>
+  <div class="input-group" id="start-controls">
+    <input type="date" id="start-date">
+    <select id="custom-start-time">
+      <option value="">時間 (預設現在)</option>
+    </select>
+  </div>
   <button id="btn-start">開始禁食</button>
   <button id="btn-stop">完成並記錄</button>
 
@@ -67,23 +90,26 @@
     <p style="margin: 5px 0;">總達成天數: <strong id="total-days">0</strong> 天</p>
     <p style="margin: 5px 0;">當前連續: <strong id="streak-days">0</strong> 天</p>
     <ul id="achievements"></ul>
+    
+    <!-- 新增：可視化歷史清單 -->
+    <div id="history-container"></div>
   </div>
 
   <div class="section">
-    <h3 style="margin-top:0; font-size: 1.1rem;">📝 手動補錄</h3>
-    <input type="date" id="manual-date">
-    <button id="btn-manual" style="background: var(--info); font-size: 1rem; padding: 10px;">補錄當天達成</button>
-    <button id="btn-delete" style="background: var(--danger); font-size: 1rem; padding: 10px; margin-top: 10px;">刪除此日紀錄</button>
+    <h3 style="margin-top:0; font-size: 1.1rem;">📝 忘記倒數？直接補錄</h3>
+    <input type="date" id="manual-date" style="margin-bottom: 10px;">
+    <button id="btn-manual" style="background: var(--info); font-size: 1rem; padding: 10px; margin: 0;">直接記錄此日達標</button>
   </div>
 
 <script>
-  // ================= 核心常數與狀態 =================
+  // ================= SECTION 2: 核心狀態與輔助函式 =================
   const FAST_HOURS = 16;
   const FAST_MS = FAST_HOURS * 60 * 60 * 1000;
   
   const MSG_START = ["加油！16小時後見！", "喝杯水，飢餓感很快就過去了。", "保持專注，你可以的！"];
   const MSG_SUCCESS = ["太棒了！你達成了一次168！", "恭喜完成！享受你的美食吧！", "意志力驚人！繼續保持！"];
   
+  // 安全的本地日期字串轉換 (YYYY-MM-DD)
   const getLocalDateStr = (d = new Date()) => {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -93,18 +119,27 @@
 
   const elTimer = document.getElementById('timer');
   const elTargetTime = document.getElementById('target-time');
+  const elStartDate = document.getElementById('start-date');
   const elCustomStartTime = document.getElementById('custom-start-time');
+  const elStartControls = document.getElementById('start-controls');
   const elBtnStart = document.getElementById('btn-start');
   const elBtnStop = document.getElementById('btn-stop');
   const elMessage = document.getElementById('message');
+  
   const elTotalDays = document.getElementById('total-days');
   const elStreakDays = document.getElementById('streak-days');
   const elAchievements = document.getElementById('achievements');
+  const elHistoryContainer = document.getElementById('history-container');
+  
   const elManualDate = document.getElementById('manual-date');
   const elBtnManual = document.getElementById('btn-manual');
-  const elBtnDelete = document.getElementById('btn-delete');
 
-  elManualDate.max = getLocalDateStr();
+  // 初始化日期為今天
+  const todayStr = getLocalDateStr();
+  elStartDate.value = todayStr;
+  elStartDate.max = todayStr;
+  elManualDate.value = todayStr;
+  elManualDate.max = todayStr;
 
   // 生成時間選項 (00:00 ~ 23:30)
   for (let h = 0; h < 24; h++) {
@@ -124,12 +159,9 @@
   } catch(e) { historyLogs = []; }
 
   let timerInterval;
+  const setMsg = (msgs) => elMessage.textContent = msgs[Math.floor(Math.random() * msgs.length)];
 
-  // ================= 邏輯函式 =================
-  const setMsg = (msgs) => {
-    elMessage.textContent = msgs[Math.floor(Math.random() * msgs.length)];
-  };
-
+  // ================= SECTION 3: 渲染邏輯與事件綁定 =================
   const updateTimerDisplay = () => {
     if (!startTime) {
       elTimer.textContent = "16:00:00";
@@ -147,28 +179,23 @@
     
     elTimer.textContent = `${h}:${m}:${s}`;
     
-    // 🎯 智慧計算並顯示目標解鎖時刻
-    const targetTimestamp = startTime + FAST_MS;
-    const targetDate = new Date(targetTimestamp);
+    // 計算目標解鎖時刻
+    const targetDate = new Date(startTime + FAST_MS);
     const nowDate = new Date();
-    
     const targetDayStart = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate()).getTime();
     const nowDayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
-    const oneDayMs = 24 * 60 * 60 * 1000;
     
     let dayPrefix = "";
-    const diffDays = Math.round((targetDayStart - nowDayStart) / oneDayMs);
+    const diffDays = Math.round((targetDayStart - nowDayStart) / (24 * 60 * 60 * 1000));
     if (diffDays === 0) dayPrefix = "今天";
     else if (diffDays === 1) dayPrefix = "明天";
     else if (diffDays === 2) dayPrefix = "後天";
     else dayPrefix = `${targetDate.getMonth()+1}/${targetDate.getDate()}`;
     
-    const targetHours = String(targetDate.getHours()).padStart(2, '0');
-    const targetMinutes = String(targetDate.getMinutes()).padStart(2, '0');
-    elTargetTime.textContent = `🎯 預計解鎖：${dayPrefix} ${targetHours}:${targetMinutes}`;
+    elTargetTime.textContent = `🎯 預計解鎖：${dayPrefix} ${String(targetDate.getHours()).padStart(2, '0')}:${String(targetDate.getMinutes()).padStart(2, '0')}`;
     
     elBtnStart.style.display = 'none';
-    elCustomStartTime.style.display = 'none';
+    elStartControls.style.display = 'none';
     elBtnStop.style.display = 'block';
 
     if (remaining === 0) {
@@ -187,6 +214,7 @@
     const total = uniqueDates.length;
     elTotalDays.textContent = total;
 
+    // 連續天數計算
     let streak = 0;
     const todayStr = getLocalDateStr();
     const yesterday = new Date();
@@ -195,7 +223,7 @@
 
     let checkDate = new Date();
     if (uniqueDates.includes(todayStr)) {
-      // 今日已達成，從今日起算
+      // 從今天算
     } else if (uniqueDates.includes(yesterdayStr)) {
       checkDate = yesterday;
     } else {
@@ -212,44 +240,86 @@
     }
     elStreakDays.textContent = streak;
 
+    // 成就渲染
     const achievements = [
-      { id: 'first', name: '首次達成', condition: total >= 1 },
-      { id: 'streak3', name: '連續 3 天', condition: streak >= 3 },
-      { id: 'total7', name: '累計 7 天', condition: total >= 7 }
+      { name: '首次達成', condition: total >= 1 },
+      { name: '連續 3 天', condition: streak >= 3 },
+      { name: '累計 7 天', condition: total >= 7 }
     ];
-
     elAchievements.innerHTML = achievements.map(a => 
-      `<li class="${a.condition ? 'achieved' : 'locked'}">
-        ${a.condition ? '✅' : '🔒'} ${a.name}
-      </li>`
+      `<li class="${a.condition ? 'achieved' : 'locked'}">${a.condition ? '✅' : '🔒'} ${a.name}</li>`
     ).join('');
+
+    // 渲染歷史清單與內聯刪除 (反轉陣列讓最新日期在最上面)
+    elHistoryContainer.innerHTML = uniqueDates.slice().reverse().map(d => `
+      <div class="history-item">
+        <span>📅 ${d}</span>
+        <span class="delete-btn" data-date="${d}">✖ 刪除</span>
+      </div>
+    `).join('');
+
+    // 綁定內聯刪除的雙重點擊事件
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+      let confirmTimeout;
+      btn.addEventListener('click', (e) => {
+        const targetDate = e.target.getAttribute('data-date');
+        if (e.target.classList.contains('confirming')) {
+          // 確認刪除
+          clearTimeout(confirmTimeout);
+          historyLogs = historyLogs.filter(log => log !== targetDate);
+          renderStats();
+          elMessage.textContent = `🗑️ 已移除 ${targetDate} 的紀錄。`;
+        } else {
+          // 第一次點擊，進入確認狀態
+          e.target.classList.add('confirming');
+          e.target.textContent = '⚠️ 確認?';
+          confirmTimeout = setTimeout(() => {
+            if (e.target) {
+              e.target.classList.remove('confirming');
+              e.target.textContent = '✖ 刪除';
+            }
+          }, 3000);
+        }
+      });
+    });
   };
 
   const recordSuccess = (dateStr) => {
     if (!historyLogs.includes(dateStr)) {
       historyLogs.push(dateStr);
       renderStats();
+      setMsg(MSG_SUCCESS);
       elMessage.textContent = `✅ 成功記錄：${dateStr}！`;
     } else {
       elMessage.textContent = `⚠️ ${dateStr} 已經記錄過囉！`;
     }
   };
 
-  // ================= 事件綁定 =================
+  // 開始禁食 (整合日期與時間)
   elBtnStart.addEventListener('click', () => {
-    let selectedTime = elCustomStartTime.value;
+    const dVal = elStartDate.value;
+    const tVal = elCustomStartTime.value;
     
-    if (!selectedTime) {
-      startTime = Date.now();
+    if (!dVal) {
+        elMessage.textContent = "日期格式錯誤，將以當下時間開始。";
+        startTime = Date.now();
     } else {
-      const [hours, minutes] = selectedTime.split(':').map(Number);
-      let d = new Date();
-      d.setHours(hours, minutes, 0, 0);
-      
-      if (d.getTime() > Date.now()) {
-        d.setDate(d.getDate() - 1);
-      }
-      startTime = d.getTime();
+        // 安全解析 YYYY-MM-DD 確保不被時區干擾
+        const [y, m, d] = dVal.split('-').map(Number);
+        const selectedDate = new Date(y, m - 1, d);
+        
+        if (tVal) {
+            const [hours, minutes] = tVal.split(':').map(Number);
+            selectedDate.setHours(hours, minutes, 0, 0);
+        } else {
+            selectedDate.setHours(new Date().getHours(), new Date().getMinutes(), 0, 0);
+        }
+        
+        startTime = selectedDate.getTime();
+        // 防呆：如果組合起來的時間大於現在，強制退回現在
+        if (startTime > Date.now()) {
+            startTime = Date.now();
+        }
     }
     
     localStorage.setItem('fast_start_time', startTime);
@@ -274,55 +344,18 @@
     elTimer.textContent = "16:00:00";
     elTargetTime.textContent = "";
     elBtnStart.style.display = 'block';
-    elCustomStartTime.style.display = '';
-    elCustomStartTime.value = '';
+    elStartControls.style.display = 'flex';
+    elCustomStartTime.value = ''; // 恢復預設
     elBtnStop.style.display = 'none';
   });
 
   elBtnManual.addEventListener('click', () => {
     const d = elManualDate.value;
-    if (!d) {
-      elMessage.textContent = "請先選擇日期！";
-      return;
-    }
+    if (!d) return elMessage.textContent = "請先選擇日期！";
     recordSuccess(d);
   });
 
-  let deleteConfirmTimeout = null;
-  elBtnDelete.addEventListener('click', () => {
-    const d = elManualDate.value;
-    if (!d) {
-      elMessage.textContent = "請先選擇要刪除的日期！";
-      return;
-    }
-    if (!historyLogs.includes(d)) {
-      elMessage.textContent = `⚠️ ${d} 目前沒有達成紀錄。`;
-      return;
-    }
-
-    if (deleteConfirmTimeout) {
-      clearTimeout(deleteConfirmTimeout);
-      deleteConfirmTimeout = null;
-      
-      historyLogs = historyLogs.filter(log => log !== d);
-      localStorage.setItem('history_logs', JSON.stringify(historyLogs));
-      renderStats();
-      
-      elMessage.textContent = `🗑️ 已刪除 ${d} 的紀錄。`;
-      elBtnDelete.textContent = '刪除此日紀錄';
-      elBtnDelete.style.opacity = '1';
-    } else {
-      elBtnDelete.textContent = '⚠️ 再次點擊以確認刪除';
-      elBtnDelete.style.opacity = '0.8';
-      deleteConfirmTimeout = setTimeout(() => {
-        deleteConfirmTimeout = null;
-        elBtnDelete.textContent = '刪除此日紀錄';
-        elBtnDelete.style.opacity = '1';
-      }, 3000);
-    }
-  });
-
-  // ================= 初始啟動 =================
+  // 啟動
   renderStats();
   if (startTime) {
     updateTimerDisplay();
